@@ -32,6 +32,24 @@
           <register name="a2"/>
         </pentry>
       </output>
+      <unaffected>
+	<register name="p0"/>
+	<register name="p1"/>
+	<register name="p2"/>
+	<register name="p3"/>
+	<register name="p4"/>
+	<register name="p5"/>
+	<register name="p6"/>
+	<register name="p7"/>
+	<register name="p8"/>
+	<register name="p9"/>
+	<register name="p10"/>
+	<register name="p11"/>
+	<register name="p12"/>
+	<register name="p13"/>
+	<register name="p14"/>
+	<register name="p15"/>
+      </unaffected>
       <localrange>
        <range space="stack"/>
       </localrange>
