@@ -62,6 +62,7 @@ define token op24 (24)
 ;
 
 define token op16 (16)
+	op16_whole = (0, 15)
 	op0_16 = (0, 3)
 	reg_r_16 = (12, 15)
 	r_16 = (12, 15)
@@ -75,6 +76,7 @@ define token op16 (16)
 	imm7_6_4 = (4, 6)
 	imm6_3_0 = (12, 15)
 	imm6_5_4 = (4, 5)
+	imm4_16 = (12, 15)
 ;
 
 attach variables [reg_r reg_s reg_t reg_r_16 reg_s_16 reg_t_16] [a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15];
@@ -83,56 +85,6 @@ attach variables [reg_r reg_s reg_t reg_r_16 reg_s_16 reg_t_16] [a0 a1 a2 a3 a4 
 #####
 # Roll macros
 #####
-
-macro back_up(sz) {
-	local index:2 = 0;
-	local a_ptr:2 = &a0;
-	local p_ptr:2 = &p0;
-	<loop_top>
-	*[register]:2 p_ptr = *[register]:2 a_ptr;
-	a_ptr = a_ptr + 1;
-	p_ptr = p_ptr + 1;
-	index = index + 1;
-	if (index < sz) goto <loop_top>; 
-}
-
-macro roll_forward(sz) {
-	local index:2 = 0;
-	local endpoint:2 = 16 - sz;
-	local src_ptr:2 = &a0 + sz;
-	local dst_ptr:2 = &a0;
-	<loop_top>
-	*[register]:2 dst_ptr = *[register]:2 src_ptr;
-	dst_ptr = dst_ptr + 1;
-	src_ptr = src_ptr + 1;
-	index = index + 1;
-	if (index < endpoint) goto <loop_top>;
-}
-
-macro restore(sz) {
-	local index:2 = 0;
-	local a_ptr:2 = &a0;
-	local p_ptr:2 = &p0;
-	<loop_top>
-	*[register]:2 a_ptr = *[register]:2 p_ptr;
-	a_ptr = a_ptr + 1;
-	p_ptr = p_ptr + 1;
-	index = index + 1;
-	if (index < sz) goto <loop_top>; 
-}
-
-macro roll_backward(sz) {
-	local index:2 = 0;
-	local endpoint:2 = 16 - sz;
-	local src_ptr:2 = &a15 - sz;
-	local dst_ptr:2 = &a15;
-	<loop_top>
-	*[register]:2 dst_ptr = *[register]:2 src_ptr;
-	dst_ptr = dst_ptr - 1;
-	src_ptr = src_ptr - 1;
-	index = index + 1;
-	if (index < endpoint) goto <loop_top>;	
-}
 
 macro rollback4(){
 	a4 = a0;
@@ -248,9 +200,19 @@ macro rollfwd12(){
 	a3 = a15;
 } 
 
+#127c -> -0xf
+#1x7x -> -0xf
+#001  111 
+
 macro instr_top(){}
 
 macro instr_bot(){}
+
+imm7: imm is imm7_6_4 & imm7_3_0
+[imm =  ((((imm7_6_4&0x4)>>2)&((imm7_6_4&0x2)>>1))*(0xFFFFFF80)) | (((imm7_6_4)<<4) | imm7_3_0);]{
+	local tmp:4 = imm;
+	export tmp;
+}
 
 rel16: loc 
 is simm16 [loc = ((inst_start+3)&0xfffffffc) + (0xfffc0000|(simm16)<<2);] {
@@ -273,18 +235,22 @@ is call_offset [loc = (inst_start&0xfffffffc) + (call_offset<<2) + 4;]
 ######################################################
 
 :call8 callRel 
-is op0=0x5 & val_n=0x2 & callRel {
+is op0=0x5 & val_n=0x2 & callRel{
+	a8 = inst_next;
 	rollfwd8();
 	call callRel;
 	rollback8();
 }
-
 
 :entry reg_s, frameSize
 is op0=0x6 & val_n=0x3 & val_m=0x0 & reg_s & frameSize {
 	reg_s = reg_s - frameSize;
 }
 
+:retw.n 
+is op16_whole=0xF01D {
+	return [a0];
+}
 
 :l32r reg_t, rel16
 is op0=0x1 & reg_t & rel16 {
@@ -296,7 +262,30 @@ is op0_16=0xd & r_16=0x0 & reg_t_16 & reg_s_16 {
 	instr_top();
 	reg_t_16 = reg_s_16;
 	instr_bot();
+} 
+
+:movi.n reg_s_16, imm7
+is op0_16=0xc & val_i=0 & reg_s_16 & imm7 {
+	instr_top();
+	reg_s_16 = imm7;
+	instr_bot();
 }
+
+s32i_offset: offst is imm4_16
+[offst = (imm4_16 << 2);] 
+{
+	local tmp:4 = offst;
+	export tmp;
+}
+
+:s32i.n reg_t_16, reg_s_16, s32i_offset
+is op0_16=0x9 & reg_s_16 & reg_t_16 & s32i_offset{
+	instr_top();
+	local vAddr:4 = reg_s_16 + s32i_offset;
+	*:4 vAddr = reg_t_16;
+	instr_bot();
+}
+
 
 
 
