@@ -57,12 +57,18 @@ define token op24 (24)
 	imm12_7_0 = (16, 23)
 	imm12_11_8 = (8, 11)
 	call_offset = (6, 23) signed
+	simm18 = (6, 23) signed
 	simm16 = (8, 23) signed
 	simm12 = (12, 23) signed
 	simm8 = (16, 23) signed
 	val_n = (4, 5)
 	val_m = (6, 7)
-
+	sa_4 = (16, 16)
+	sa_3_0 = (8, 11)
+	lsa_4 = (20, 20)
+	lsa_3_0 = (4, 7)
+	bbi_3_0 = (4, 7)
+	bbi_4 = (12, 12)
 ;
 
 define token op16 (16)
@@ -234,41 +240,32 @@ is imm12 [loc=imm12<<3;]{
 	export tmp; 
 }
 
+rel8: loc
+is simm8 [loc = inst_start + simm8 + 4;] 
+{export *:4 loc;}
+
 callRel: loc
 is call_offset [loc = (inst_start&0xfffffffc) + (call_offset<<2) + 4;]
 {
 	export *:4 loc;
 }
 
+imm_4bit_converted: imm is t_16
+[imm = (-1 * ( ((~t_16)&0x1) & (((~t_16)>>1)&0x1) & (((~t_16)>>2)&0x1) & (((~t_16)>>3)&0x1))) |
+	(t_16  * (((t_16)&0x1) | ((t_16>>1)&0x1) | ((t_16>>2)&0x1) | ((t_16>>3)&0x1)));]
+{
+	local tmp:4 = imm;
+	export tmp;
+}
+
 
 ######################################################
+# INSTRUCTIONS
+######################################################
 
-:call8 callRel 
-is op0=0x5 & val_n=0x2 & callRel{
-	a8 = inst_next;
-	rollfwd8();
-	call callRel;
-	rollback8();
-}
-
-:callx8 reg_s 
-is val_m=0x3 & val_n=0x2 & op0=0 & r=0 & op1=0 & op2=0 & reg_s{
-	local dst:4 = reg_s;
-	a8 = inst_next;
-	rollfwd8();
-	call [dst];
-	rollback8();
-}
-
-:entry reg_s, frameSize
-is op0=0x6 & val_n=0x3 & val_m=0x0 & reg_s & frameSize {
-	reg_s = reg_s - frameSize;
-}
-
-:retw.n 
-is op16_whole=0xF01D {
-	return [a0];
-}
+############
+# LOAD/STORE
+############
 
 :l32r reg_t, rel16
 is op0=0x1 & reg_t & rel16 {
@@ -286,6 +283,24 @@ is op0_16=0xd & r_16=0x0 & reg_t_16 & reg_s_16 {
 is op0_16=0xc & val_i=0 & reg_s_16 & imm7 {
 	instr_top();
 	reg_s_16 = imm7;
+	instr_bot();
+}
+
+:moveqz reg_r, reg_s, reg_t
+is op0=0x0 & op1=0x3 & op2=0x8 & reg_r & reg_s & reg_t {
+	instr_top();
+	if(reg_t != 0) goto <done>;
+	reg_r = reg_s;
+	<done>
+	instr_bot();
+}
+
+:movnez reg_r, reg_s, reg_t
+is op0=0x0 & op1=0x3 & op2=0x9 & reg_r & reg_s & reg_t {
+	instr_top();
+	if(reg_t == 0) goto <done>; 
+	reg_r = reg_s;
+	<done>
 	instr_bot();
 }
 
@@ -319,11 +334,35 @@ i32_offset_8: offst is imm8
 	export tmp;
 }
 
+:l32i reg_t, reg_s, i32_offset_8
+is op0=0x2 & r=0x2 & reg_s & reg_t & i32_offset_8{
+	instr_top();
+	local vAddr:4 = reg_s + i32_offset_8;
+	reg_t = *:4 vAddr;
+	instr_bot();
+}
+
 :s32i reg_t, reg_s, i32_offset_8
-is r=6 & op0=2 & reg_t & reg_s & i32_offset_8{
+is op0=2 & r=6 & reg_t & reg_s & i32_offset_8{
 	instr_top();
 	local vAddr:4 = reg_s + i32_offset_8;
 	*:4 vAddr = reg_t;
+	instr_bot();
+}
+
+:l8ui reg_t, reg_s, imm8
+is op0=0x2 & r=0x0 & reg_s & reg_t & imm8 {
+	instr_top();
+	local vAddr:4 = reg_s + imm8;
+	reg_t = *:1 vAddr;
+	instr_bot();
+}
+
+:s8i reg_t, reg_s, imm8
+is op0=0x2 & r=0x4 & reg_s & reg_t & imm8 {
+	instr_top();
+	local vAddr:4 = reg_s + imm8;
+	*:1 vAddr = reg_t[0,8];
 	instr_bot();
 }
 
@@ -333,7 +372,7 @@ is op0=0x6 & val_n=0x1 & val_m=0x1 & reg_s & rel12{
 }
 
 :mov reg_r, reg_s
-is op2=2 & op1=0 & op0=0 & reg_r & reg_s {
+is op0=0 & op1=0 & op2=2 & (t=r) & reg_r & reg_s {
 	instr_top();
 	reg_r = reg_s;
 	instr_bot();
@@ -346,11 +385,88 @@ imm12_split: imm is imm12_11_8 & imm12_7_0
 }
 
 :movi reg_t, imm12_split 
-is r=0xa & op0=0x2 & imm12_split & reg_t {
+is op0=0x2 & r=0xa & imm12_split & reg_t {
 	instr_top();
 	reg_t = imm12_split;
 	instr_bot();
 }
+
+
+####################
+# BRANCHES (& jumps)
+####################
+
+:call8 callRel 
+is op0=0x5 & val_n=0x2 & callRel{
+	a8 = inst_next;
+	rollfwd8();
+	call callRel;
+	rollback8();
+}
+
+:callx8 reg_s 
+is op0=0 & op1=0 & op2=0 & val_m=0x3 & val_n=0x2 & r=0 & reg_s{
+	local dst:4 = reg_s;
+	a8 = inst_next;
+	rollfwd8();
+	call [dst];
+	rollback8();
+}
+
+:entry reg_s, frameSize
+is op0=0x6 & val_n=0x3 & val_m=0x0 & reg_s & frameSize {
+	reg_s = reg_s - frameSize;
+}
+
+:retw.n 
+is op16_whole=0xF01D {
+	return [a0];
+}
+#b4const: enc_const is imm8
+#[enc_const = (-1*(imm8=0x0)) | (0x1*(imm8=0x1)) | (0x2*(imm8=0x2));]
+#{local tmp:4 = enc_const; export tmp;}
+
+with b4const: {
+	:enc_const is r=0x0 [enc_const =   -1;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x1 [enc_const =    1;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x2 [enc_const =    2;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x3 [enc_const =    3;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x4 [enc_const =    4;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x5 [enc_const =    5;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x6 [enc_const =    6;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x7 [enc_const =    7;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x8 [enc_const =    8;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x9 [enc_const =   10;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xA [enc_const =   12;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xB [enc_const =   16;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xC [enc_const =   32;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xD [enc_const =   64;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xE [enc_const =  128;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xF [enc_const =  256;]{local tmp:4 = enc_const; export tmp;}
+}
+
+with b4constu: {
+	:enc_const is r=0x0 [enc_const =32678;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x1 [enc_const =65536;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x2 [enc_const =    2;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x3 [enc_const =    3;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x4 [enc_const =    4;]{local tmp:4 = enc_const; export tmp;} 
+	:enc_const is r=0x5 [enc_const =    5;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x6 [enc_const =    6;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x7 [enc_const =    7;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x8 [enc_const =    8;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0x9 [enc_const =   10;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xA [enc_const =   12;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xB [enc_const =   16;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xC [enc_const =   32;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xD [enc_const =   64;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xE [enc_const =  128;]{local tmp:4 = enc_const; export tmp;}
+	:enc_const is r=0xF [enc_const =  256;]{local tmp:4 = enc_const; export tmp;}
+}
+
+br_offset18: loc is simm18 
+[loc = simm18 + inst_start + 4;]
+{export *:4 loc;}
 
 br_offst6: loc is imm6_5_4 & imm6_3_0 
 [loc = inst_start + ((imm6_5_4<<4)|imm6_3_0) + 4;]
@@ -363,6 +479,7 @@ is op0_16=0xc & reg_s_16 & br_offst6 & val_i=1 & val_z=1 {
 	if(reg_s_16 != 0) goto br_offst6;
 }
 
+#TODO: delete this and replace with rel8
 br_offst_simm8: loc is simm8
 [loc = inst_start + simm8 + 4;]
 {
@@ -374,11 +491,206 @@ is op0=0x7 & r=0x1 & reg_s & reg_t & br_offst_simm8 {
 	if(reg_s == reg_t) goto br_offst_simm8;
 }
 
+:bgeu reg_s, reg_t, rel8
+is op0=0x7 & r=0xb & reg_s & reg_t & rel8 {
+	if(reg_s >= reg_t) goto rel8;
+}
+
+:bgeui reg_s, b4constu, rel8
+is op0=0x6 & val_n=0x3 & val_m=0x3 & reg_s & b4constu & rel8 {
+	if(reg_s >= b4constu) goto rel8;
+}
+
+:bltu reg_s, reg_t, rel8
+is op0=7 & r=0x3 & reg_s & reg_t & rel8 {
+	if(reg_s < reg_t) goto rel8;
+}
+
+:bltui reg_s, b4constu, rel8
+is op0=0x6 & val_n=0x3 & val_m=0x2 & reg_s & b4constu & rel8 {
+	if(reg_s < b4constu) goto rel8;
+}
+
+:bne reg_s, reg_t, rel8 
+is op0=7 & r=0x9 & reg_s & reg_t & rel8 {
+	if(reg_s != reg_t) goto rel8;
+}
+
+:bnei reg_s, b4const, rel8 
+is op0=0x6 & val_n=0x2 & val_m=0x1 & reg_s & b4const & rel8 {
+	if(reg_s != b4const) goto rel8;
+}
+
+:beqz reg_s, rel12 
+is op0=0x6 & val_n=0x1 & val_m=0 & reg_s & rel12 {
+	if(reg_s == 0) goto rel12;
+}
+
+:beqi reg_s, b4const, rel8 
+is op0=0x6 & val_n=0x2 & val_m=0x0 & reg_s & b4const & rel8 {
+	if(reg_s == b4const) goto rel8;
+}
+
+:beqz.n reg_s_16, br_offst6
+is op0_16=0xc & t_16>=0x8 & t_16<=0xb & reg_s_16 & br_offst6 {
+	if(reg_s_16==0x0) goto br_offst6;
+}
+
+:bnone reg_s, reg_t, rel8
+is op0=0x7 & r=0x0 & reg_s & reg_t & rel8 {
+	if((reg_s & reg_t) == 0) goto rel8;
+}
+
+bbi: imm is bbi_3_0 & bbi_4 
+[imm = (bbi_4 << 4) | bbi_3_0;]
+{local tmp:4 = imm; export tmp;}
+
+#TODO: make conditional on LE/BE decoding
+:bbsi reg_s, bbi, rel8 
+is op0=0x7 & ((r=0xe) | (r=0xf)) & bbi & reg_s & rel8 {
+	local bit:4 = (reg_s>>bbi) & 0x1;
+	if(bit!=0) goto rel8;
+}
+
+:j br_offset18
+is op0=0x6 & val_n=0 & br_offset18 {
+	goto br_offset18;
+}
+
+########
+# MATH
+########
+
+maskimm: imm is op2
+[imm = op2 + 1;]
+{local tmp:4 = imm; export tmp;}
+
+shiftimm: imm is sa_3_0 & sa_4
+[imm = (sa_4 << 4) | sa_3_0;]
+{local tmp:4 = imm; export tmp;}
+
+#TODO:synthesize mask and shift in disassembly action?
+:extui reg_r, reg_t, shiftimm, maskimm
+is op0=0 & (op1=0x4 | op1=0x5) & reg_r & reg_t & shiftimm & maskimm & op2{
+	instr_top();
+	local mask:4 = 0xFFFFFFFF>>(32-maskimm);
+	reg_r = (reg_t >> shiftimm) & mask;
+	instr_bot();
+}
+
+:neg reg_r, reg_t 
+is op0=0 & op1=0 & op2=0x6 & s=0 & reg_r & reg_t {
+	instr_top();
+	reg_r = 0 - reg_t;
+	instr_bot();
+}
+
+:max reg_r, reg_s, reg_t 
+is op0=0x0 & op1=0x3 & op2=0x5 & reg_r & reg_s & reg_t {
+	instr_top();
+	local max:4;
+	if(reg_s s< reg_t) goto <s_less>;
+	max = reg_s;
+	goto <end>;
+	<s_less>
+	max = reg_t;
+	<end>
+	reg_r = max;
+	instr_bot();
+}
+
+lshift: imm is lsa_3_0 & lsa_4
+[imm = 32 - ((lsa_4<<4) | lsa_3_0);]
+{local tmp:4 = imm; export imm;}
+
+:slli reg_r, reg_s, lshift
+is op0=0 & op1=0x1 & ((op2=0) | (op2=1)) & lshift & reg_s & reg_r {
+	reg_r = reg_s << lshift;
+}
+
+:sub reg_r, reg_s, reg_t 
+is op0=0x0 & op1=0x0 & op2=0xC & reg_r & reg_s & reg_t {
+	instr_top();
+	reg_r = reg_s - reg_t;
+	instr_bot();
+}
+
+:add reg_r, reg_s, reg_t
+is op0=0x0 & op1=0x0 & op2=0x8 & reg_r & reg_s & reg_t {
+	instr_top();
+	reg_r = reg_s + reg_t;
+	instr_bot();
+}
+
+
+:addi reg_t, reg_s, simm8 
+is op0=0x2 & r=0xc & reg_t & reg_s & simm8 {
+	instr_top();
+	reg_t = reg_s + simm8;
+	instr_bot();
+}
+
 :add.n reg_r_16, reg_s_16, reg_t_16
 is op0_16=0xa & reg_r_16 & reg_s_16 & reg_t_16 {
 	instr_top();
 	reg_r_16 = reg_s_16 + reg_t_16;
 	instr_bot();
+}
+
+:addi.n reg_r_16, reg_s_16, imm_4bit_converted 
+is op0_16=0xb & reg_r_16 & reg_s_16 & imm_4bit_converted {
+	instr_top();
+	reg_r_16 = reg_s_16 + imm_4bit_converted;
+	instr_bot();
+}
+
+:addx4 reg_r, reg_s, reg_t 
+is op0=0 & op1=0 & op2=0xa & reg_r & reg_s & reg_t {
+	instr_top();
+	reg_r = (reg_s << 2) + reg_t;
+	instr_bot();
+}
+
+:muluh reg_r, reg_s, reg_t
+is op0=0x0 & op1=0x2 & op2=0xa & reg_r & reg_s & reg_t {
+	instr_top();
+	local ext_s:8 = zext(reg_s);
+	local ext_t:8 = zext(reg_t);
+	local mul:8 = ext_s * ext_t;
+	reg_r = mul[32,32];
+	instr_bot();
+}
+
+:and reg_r, reg_s, reg_t
+is op0=0x0 & op1=0x0 & op2=0x1 & reg_r & reg_s & reg_t {
+	instr_top();
+	reg_r = reg_s & reg_t;
+	instr_bot();
+}
+
+:or reg_r, reg_s, reg_t
+is op0=0x0 & op1=0x0 & op2=0x2 & reg_r & reg_s & reg_t {
+	instr_top();
+	reg_r = reg_s | reg_t;
+	instr_bot();
+}
+
+:xor reg_r, reg_s, reg_t 
+is op0=0x0 & op1=0x0 & op2=0x3 & reg_r & reg_s & reg_t {
+	instr_top();
+	reg_r = reg_s ^ reg_t;
+	instr_bot();
+}
+
+#############
+# CONTROL
+#############
+
+define pcodeop memw;
+
+:memw 
+is op0=0x0 & op1=0x0 & op2=0x0 & r=0x2 & t=0xc & s=0x0 {
+	#memw();
 }
 
 
@@ -415,21 +727,6 @@ is op0=0x0 & op1=0x0 & op2=0x0 & r=0x2 & t=0x0 & s=0x0 {
 	isync();
 }
 
-imm_4bit_converted: imm is t_16
-[imm = (-1 * ( ((~t_16)&0x1) & (((~t_16)>>1)&0x1) & (((~t_16)>>2)&0x1) & (((~t_16)>>3)&0x1))) |
-	(t_16  * (((t_16)&0x1) | ((t_16>>1)&0x1) | ((t_16>>2)&0x1) | ((t_16>>3)&0x1)));]
-{
-	local tmp:4 = imm;
-	export tmp;
-}
-
-:addi.n reg_r_16, reg_s_16, imm_4bit_converted 
-is op0_16=0xb & reg_r_16 & reg_s_16 & imm_4bit_converted {
-	instr_top();
-	reg_r_16 = reg_s_16 + imm_4bit_converted;
-	instr_bot();
-}
-
 #TODO: replace wsr pcodeop
 define pcodeop wsr;
 :wsr  reg_t, sr 
@@ -438,4 +735,4 @@ is op0=0 & op1=0x3 & op2=0x1 & sr & reg_t {
 	wsr(reg_t, tmp);
 }
 
-#20 61 13
+#66 22 10
