@@ -38,6 +38,9 @@ define register offset=0x00 size=4 [a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a1
 
 define register offset=0x40 size=4 [p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15];
 
+define register offset=0x80 size=4 [f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15];
+
+define register offset=0xC0 size=1 [b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 b12 b13 b14 b15];
 
 define token op24 (24)
 	op0 = (0,3)
@@ -45,10 +48,16 @@ define token op24 (24)
 	op2 = (20, 23)
 	reg_r = (12, 15)
 	r = (12, 15)
+	fl_r = (12, 15)
+	b_r = (12, 15)
 	reg_s = (8, 11)
+	b_s =(8, 11)
 	s = (8, 11)
+	fl_s = (8, 11)
 	reg_t = (4, 7)
+	b_t = (4, 7)
 	t = (4, 7)
+	fl_t = (4, 7)
 	sr = (8, 15)
 	imm4 = (20, 23)
 	imm8 = (16, 23)
@@ -91,6 +100,8 @@ define token op16 (16)
 ;
 
 attach variables [reg_r reg_s reg_t reg_r_16 reg_s_16 reg_t_16] [a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15];
+attach variables [fl_r fl_s fl_t] [f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15];
+attach variables [b_r  b_s  b_t ] [b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 b12 b13 b14 b15];
 
 
 #####
@@ -287,6 +298,35 @@ is op0_16=0xc & val_i=0 & reg_s_16 & imm7 {
 	instr_bot();
 }
 
+:rfr reg_r, fl_s 
+is op0=0x0 & op1=0xa & op2=0xf & t=0x4 & reg_r & fl_s {
+	instr_top();
+	reg_r = fl_s;
+	instr_bot();
+}
+
+:wfr fl_r, reg_s 
+is op0=0x0 & op1=0xa & op2=0xf & t=0x5 & fl_r & reg_s {
+	instr_top();
+	fl_r = reg_s;
+	instr_bot();
+}
+
+#TODO: add pcode for correct windowing behavior
+:movsp reg_t, reg_s
+is op0=0x0 & op1=0x0 & op2=0x0 & r=0x1 & reg_s & reg_t {
+	instr_top();
+	reg_t = reg_s;
+	instr_bot();
+}
+
+:mov.s fl_r, fl_s
+is op0=0x0 & op1=0xa & op2=0xf & t=0x0 & fl_r & fl_s {
+	instr_top();
+	fl_r = fl_s;
+	instr_bot();
+}
+
 :movt reg_r, reg_s, reg_t
 is op0=0x0 & op1=0x3 & op2=0xd & reg_r & reg_s & reg_t {
 	instr_top();
@@ -327,6 +367,15 @@ is op0=0x0 & op1=0x3 & op2=0x8 & reg_r & reg_s & reg_t {
 is op0=0x0 & op1=0x3 & op2=0x9 & reg_r & reg_s & reg_t {
 	instr_top();
 	if(reg_t == 0) goto <done>; 
+	reg_r = reg_s;
+	<done>
+	instr_bot();
+}
+
+:movf reg_r, reg_s, b_t
+is op0=0x0 & op1=0x3 & op2=0xc & reg_r & reg_s & b_t {
+	instr_top();
+	if(b_t) goto <done>; 
 	reg_r = reg_s;
 	<done>
 	instr_bot();
@@ -413,11 +462,58 @@ is op0=0x2 & r=0x2 & reg_s & reg_t & i32_offset_8{
 	instr_bot();
 }
 
+:ssi fl_t, reg_s, i32_offset_8 
+is op0=0x3 & r=0x4 & reg_s & fl_t & i32_offset_8 {
+	instr_top();
+	local vAddr:4 = reg_s + i32_offset_8;
+	*:4 vAddr = fl_t;
+	instr_bot();
+}
+
+:ssiu fl_t, reg_s, i32_offset_8
+is op0=0x3 & r=0xc & reg_s & fl_t & i32_offset_8 {
+	instr_top();
+	local vAddr:4 = reg_s + i32_offset_8;
+	*:4 vAddr = fl_t;
+	reg_s = vAddr;
+	instr_bot();
+}
+
+:lsi fl_t, reg_s, i32_offset_8
+is op0=0x3 & r=0x0 & reg_s & fl_t & i32_offset_8 {
+	instr_top();
+	local vAddr:4 = reg_s + i32_offset_8;
+	fl_t = *:4 vAddr;
+	instr_bot();
+}
+
+:lsiu fl_t, reg_s, i32_offset_8
+is op0=0x3 & r=0x8 & reg_s & fl_t & i32_offset_8 {
+	instr_top();
+	local vAddr:4 = reg_s + i32_offset_8;
+	fl_t = *:4 vAddr;
+	reg_s = vAddr;
+	instr_bot();
+}
+
 :s32i reg_t, reg_s, i32_offset_8
 is op0=2 & r=6 & reg_t & reg_s & i32_offset_8{
 	instr_top();
 	local vAddr:4 = reg_s + i32_offset_8;
 	*:4 vAddr = reg_t;
+	instr_bot();
+}
+
+:s32c1i reg_t, reg_s, i32_offset_8
+is op0=0x2 & r=0xe & reg_s & reg_t & i32_offset_8 {
+	instr_top();
+	local vAddr:4 = reg_s + i32_offset_8;
+	local memval:4 = *:4 vAddr;
+	if(memval != SCOMPARE1) goto <done>;
+	*:4 vAddr = reg_t;
+	SCOMPARE1 = reg_t;
+	<done>
+	reg_t = memval;
 	instr_bot();
 }
 
@@ -430,6 +526,15 @@ is op0=0x6 & val_n=0x1 & val_m=0x1 & reg_s & rel12{
 is op0=0 & op1=0 & op2=2 & (t=r) & reg_r & reg_s {
 	instr_top();
 	reg_r = reg_s;
+	instr_bot();
+}
+
+:movgez.s fl_r, fl_s, reg_t 
+is op0=0x0 & op1=0xb & op2=0xb & fl_r & fl_s & reg_t {
+	instr_top();
+	if(reg_t s< 0) goto <done>;
+	fl_r = fl_s;
+	<done>
 	instr_bot();
 }
 
@@ -453,6 +558,9 @@ is op0=0x2 & r=0xa & imm12_split & reg_t {
 
 :nop.n
 is op16_whole=0xF03D {}
+
+:nop 
+is op0=0x0 & op1=0x0 & op2=0x0 & r=0x2 & t=0xf & s=0x0 {}
 
 :call0 callRel 
 is op0=0x5 & val_n=0 & callRel {
@@ -503,6 +611,16 @@ is op0=0x0 & op1=0x0 & op2=0x0 & r=0x0 & s=0x0 & val_n=0x1 & val_m=0x2 {
 
 :retw.n 
 is op16_whole=0xF01D {
+	return [a0];
+}
+
+:ret 
+is op0=0x0 & op1=0x0 & op2=0x0 & val_n=0x0 & val_m=0x2 & reg_r=0x0 & reg_s=0x0 {
+	return [a0];
+}
+
+:ret.n
+is op16_whole=0xF00D {
 	return [a0];
 }
 
@@ -573,6 +691,17 @@ br_offst_simm8: loc is simm8
 :beq reg_s, reg_t, br_offst_simm8
 is op0=0x7 & r=0x1 & reg_s & reg_t & br_offst_simm8 {
 	if(reg_s == reg_t) goto br_offst_simm8;
+}
+
+:bt b_s, rel8
+is op0=0x6 & r=0x1 & t=0x7 & b_s & rel8 {
+	if(b_s) goto rel8;
+} 
+
+
+:bf b_s, rel8
+is op0=0x6 & r=0x0 & t=0x7 & b_s & rel8 {
+	if(!b_s) goto rel8; 
 }
 
 :bge reg_s, reg_t, rel8 
@@ -1084,6 +1213,159 @@ is op0=0x0 & op1=0x0 & op2=0x3 & reg_r & reg_s & reg_t {
 	instr_bot();
 }
 
+:abs.s fl_r, fl_s 
+is op0=0x0 & op1=0xa & op2=0xf & t=0x1 & fl_r & fl_s {
+	instr_top();
+	fl_r = abs(fl_s);
+	instr_bot();
+}
+
+:neg.s fl_r, fl_s
+is op0=0x0 & op1=0xa & op2=0xf & t=0x6 & fl_r & fl_s {
+	instr_top();
+	fl_r = f- fl_s;
+	instr_bot();
+}
+
+:add.s fl_r, fl_s, fl_t
+is op0=0x0 & op1=0xa & op2=0x0 & fl_r & fl_s & fl_t {
+	instr_top();
+	fl_r = fl_s f+ fl_t;
+	instr_bot();
+}
+
+:sub.s fl_r, fl_s, fl_t
+is op0=0x0 & op1=0xa & op2=0x1 & fl_r & fl_s & fl_t {
+	instr_top();
+	fl_r = fl_s f- fl_t;
+	instr_bot();
+}
+
+:mul.s fl_r, fl_s, fl_t
+is op0=0x0 & op1=0xa & op2=0x2 & fl_r & fl_s & fl_t {
+	instr_top();
+	fl_r = fl_s f* fl_t;
+	instr_bot();
+}
+
+:madd.s fl_r, fl_s, fl_t
+is op0=0x0 & op1=0xa & op2=0x4 & fl_r & fl_s & fl_t {
+	instr_top();
+	fl_r = fl_r f+ (fl_s f* fl_t);
+	instr_bot();
+}
+
+:msub.s fl_r, fl_s, fl_t
+is op0=0x0 & op1=0xa & op2=0x5 & fl_r & fl_s & fl_t {
+	instr_top();
+	fl_r = fl_r f- (fl_s f* fl_t);
+	instr_bot();
+}
+
+:oeq.s b_r, fl_s, fl_t
+is op0=0x0 & op1=0xb & op2=0x2 & b_r & fl_s & fl_t {
+	instr_top();
+	b_r = (fl_s f== fl_t);
+	instr_bot();
+}
+
+:olt.s b_r, fl_s, fl_t
+is op0=0x0 & op1=0xb & op2=0x4 & b_r & fl_s & fl_t {
+	instr_top();
+	b_r = fl_s f< fl_t;
+	instr_bot();
+}
+
+:ole.s b_r, fl_s, fl_t
+is op0=0x0 & op1=0xb & op2=0x6 & b_r & fl_s & fl_t {
+	instr_top();
+	b_r = fl_s f<= fl_t;
+	instr_bot();
+}
+
+with scalefactor_float: {
+	:scaler is t=0x0 [scaler =     1;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}	
+	:scaler is t=0x1 [scaler =     2;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x2 [scaler =     4;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x3 [scaler =     8;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x4 [scaler =    16;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x5 [scaler =    32;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x6 [scaler =    64;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x7 [scaler =   128;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x8 [scaler =   256;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0x9 [scaler =   512;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0xa [scaler =  1024;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0xb [scaler =  2048;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0xc [scaler =  4096;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0xd [scaler =  8192;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0xe [scaler = 16384;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+	:scaler is t=0xf [scaler = 32768;] {local int_tmp:4 = scaler; local float_tmp:4 = int2float(int_tmp); export float_tmp;}
+}
+
+#with scalefactor_int: {
+#	:scaler is t=0x0 [scaler =     1;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x1 [scaler =     2;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x2 [scaler =     4;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x3 [scaler =     8;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x4 [scaler =    16;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x5 [scaler =    32;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x6 [scaler =    64;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x7 [scaler =   128;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x8 [scaler =   256;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0x9 [scaler =   512;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0xa [scaler =  1024;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0xb [scaler =  2048;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0xc [scaler =  4096;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0xd [scaler =  8192;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0xe [scaler = 16384;] {local int_tmp:4 = scaler; export int_tmp;}	
+#	:scaler is t=0xf [scaler = 32768;] {local int_tmp:4 = scaler; export int_tmp;}	
+#}
+
+
+:trunc.s reg_r, fl_s, t
+is op0=0x0 & op1=0xa & op2=0x9 & reg_r & fl_s & t & scalefactor_float {
+	instr_top();
+	reg_r = trunc(fl_s f* scalefactor_float);
+	instr_bot();
+}
+
+:utrunc.s reg_r, fl_s, t
+is op0=0x0 & op1=0xa & op2=0xe & reg_r & fl_s & t & scalefactor_float {
+	instr_top();
+	local out:4;
+	if(fl_s f< 0) goto <lt>;
+	#<gez>
+	out = trunc(fl_s f* scalefactor_float);
+	goto <exit>;
+	<lt>
+	out = 0x80000000;
+	<exit>
+	reg_r = out;
+	instr_bot();
+}
+
+:round.s reg_r, fl_s, t
+is op0=0x0 & op1=0xa & op2=0x8 & reg_r & fl_s & t & scalefactor_float {
+	instr_top();
+	reg_r = round(fl_s f* scalefactor_float);
+	instr_bot();
+}
+
+:float.s fl_r, reg_s, t
+is op0=0x0 & op1=0xa & op2=0xc & fl_r & reg_s & t & scalefactor_float {
+	instr_top();
+	fl_r = int2float(reg_s) f/ scalefactor_float;
+	instr_bot();
+}
+
+:ufloat.s fl_r, reg_s, t
+is op0=0x0 & op1=0xa & op2=0xd & fl_r & reg_s & t & scalefactor_float {
+	instr_top();
+	local uint:8 = zext(reg_s);
+	fl_r = int2float(uint) f/ scalefactor_float;
+	instr_bot();
+}
+
 #############
 # CONTROL
 #############
@@ -1185,6 +1467,8 @@ is op0=0x0 & op1=0x0 & op2=0x4 & r=0x7 & reg_s & reg_t {
 #TODO: replace wsr pcodeop
 define pcodeop wsr;
 define pcodeop rsr;
+define pcodeop xsr;
+
 :wsr  reg_t, sr 
 is op0=0 & op1=0x3 & op2=0x1 & sr & reg_t {
 	local tmp:4 = sr;
@@ -1195,6 +1479,12 @@ is op0=0 & op1=0x3 & op2=0x1 & sr & reg_t {
 is op0=0x0 & op1=0x3 & op2=0x0 & reg_t & sr {
 	local tmp:4 = sr;
 	rsr(reg_t, tmp);
+}
+
+:xsr reg_t, sr
+is op0=0 & op1=0x1 & op2=0x6 & reg_t & sr {
+	local tmp:4 = sr;
+	xsr(reg_t, tmp);
 }
 
 
@@ -1256,4 +1546,22 @@ is op0=0x6 & t=0x7 & r=0x8 & reg_s & rel8 {
 	local count:4 = reg_s;
 	local loop_top:4 = inst_next;
 	loop(loop_top, rel8, count);
+}
+
+
+define pcodeop WriteUserReg;
+define pcodeop ReadUserReg;
+:wur reg_t, sr 
+is op0=0x0 & op1=0x3 & op2=0xf & reg_t & sr {
+	local tmp:4 = sr;
+	WriteUserReg(reg_t, tmp);
+}
+
+####
+# UNCERTAIN
+####
+define pcodeop ExceptionWait;
+:excw 
+is op0=0x3 & op1=0x0 & op2=0x6 & r=0x3 & s=0x0 & t=0x1 {
+	ExceptionWait();
 }
