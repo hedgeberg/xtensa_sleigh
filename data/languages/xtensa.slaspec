@@ -23,10 +23,10 @@ define space ram 	type=ram_space 		size=$(PTRSIZE) wordsize=1 default;
 #define space spec_reg 	type=register_space 	size=2;
 define space register 	type=register_space 	size=2;
 
-define register offset=0x800 size=4 [PC SP];
+define register offset=0x800 size=4 [PC SP EPC];
 define register offset=0x400 size=4 [LBEG LEND LCOUNT SAR BR LITBASE _ _ _ _ _ _ SCOMPARE1 _ _ _];
 define register offset=0x500 size=4 [_ _ _ _ _ _ _ _ WindowBase WindowStart _ _ _ _ _ _];
-define register offset=0x798 size=4 [PS];
+define register offset=0x798 size=4 [PS]; 
 
 define context PS
 	CALLINC = (16, 17)
@@ -146,7 +146,7 @@ macro rollback8(){
 	a7 = p7;
 }
 
-macro roolback12(){
+macro rollback12(){
 	a12 = a0;
 	a13 = a1;
 	a14 = a2;
@@ -597,6 +597,14 @@ is op0=0 & op1=0 & op2=0 & val_m=0x3 & val_n=0x2 & r=0 & reg_s{
 	rollfwd8();
 	call [dst];
 	rollback8();
+}
+
+:call12 callRel
+is op0=0x5 & val_n=0x3 & callRel {
+	a12 = inst_next;
+	rollfwd12();
+	call callRel;
+	rollback12();
 }
 
 :entry reg_s, frameSize
@@ -1548,6 +1556,31 @@ is op0=0x6 & t=0x7 & r=0x8 & reg_s & rel8 {
 	loop(loop_top, rel8, count);
 }
 
+#TODO: possible to implement exception behaviors w/o breaking decomp?
+e32_offset: loc is r 
+[loc = 0xffffffc0 | (r << 2);]
+{local tmp:4 = loc; export tmp;}
+
+:s32e reg_t, reg_s, e32_offset
+is op0=0x0 & op1=0x9 & op2=0x4 & reg_t & reg_s & e32_offset{
+	instr_top();
+	local vAddr:4 = reg_s + e32_offset;
+	*:4 vAddr = reg_t;
+	instr_bot();
+}
+
+:l32e reg_t, reg_s, e32_offset
+is op0=0x0 & op1=0x9 & op2=0x0 & reg_t & reg_s & e32_offset{
+	instr_top();
+	local vAddr:4 = reg_s + e32_offset;
+	reg_t = *:4 vAddr;
+	instr_bot();
+}
+
+:rfwo 
+is op0=0x0 & op1=0x0 & op2=0x0 & t=0x0 & s=0x4 & r=0x3 {
+	return [EPC];
+}
 
 define pcodeop WriteUserReg;
 define pcodeop ReadUserReg;
